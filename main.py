@@ -18,7 +18,6 @@ def home():
 def keep_alive():
     Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8080}).start()
 
-# Start Flask server before the bot starts
 keep_alive()
 
 # === LOAD ENV ===
@@ -76,7 +75,6 @@ products = [
     ("OTHER PRODUCT", "OTHER PRODUCT")
 ]
 
-
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
@@ -126,7 +124,8 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
         return
 
     view = ProductView()
-    await interaction.response.send_message("Please select a product to vouch for:", view=view, ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send("Please select a product to vouch for:", view=view, ephemeral=True)
     await view.wait()
 
     product = view.selected
