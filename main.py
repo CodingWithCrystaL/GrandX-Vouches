@@ -51,6 +51,11 @@ products = [
     ("1337-ch3at5", "1337-ch3at5"),
     ("grandrp-m0n3y", "grandrp-m0n3y"),
     ("grandrp-acc0unt5", "grandrp-acc0unt5"),
+    ("grandrp-m0n3y-m3th0d", "grandrp-m0n3y-m3th0d"),
+    ("tr1gg3r-b0t", "tr1gg3r-b0t"),
+    ("shax-cl3an3r", "shax-cl3an3r"),
+    ("custom-discord-bot", "custom-discord-bot"),
+    ("custom-ch3at3r", "custom-ch3at3r"),
     ("l3ad3r-scr1pts", "l3ad3r-scr1pts"),
     ("adm1n-scr1pts", "adm1n-scr1pts"),
     ("l3ad3r-or-adm1n-appl1cat1on", "l3ad3r-or-adm1n-appl1cat1on"),
@@ -70,6 +75,7 @@ products = [
     ("4M4ZON-SHOP", "4M4ZON-SHOP"),
     ("OTHER PRODUCT", "OTHER PRODUCT")
 ]
+
 
 @bot.event
 async def on_ready():
