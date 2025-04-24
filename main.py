@@ -47,7 +47,6 @@ tree = bot.tree
 
 DB_FILE = "vouches.db"
 
-# === UPDATED PRODUCT LIST ===
 products = [
     ("1337-ch3at5", "1337-ch3at5"),
     ("grandrp-m0n3y", "grandrp-m0n3y"),
@@ -126,7 +125,8 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
         return
 
     view = ProductView()
-    await interaction.response.send_message("Please select a product to vouch for:", view=view, ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send("Please select a product to vouch for:", view=view, ephemeral=True)
     await view.wait()
 
     product = view.selected
