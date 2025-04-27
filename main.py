@@ -1,3 +1,4 @@
+# === IMPORTS ===
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
 
-# === KEEP ALIVE ===
+# === KEEP ALIVE (for hosting) ===
 app = Flask(__name__)
 
 @app.route('/')
@@ -16,12 +17,11 @@ def home():
     return "✅ Bot is alive!"
 
 def keep_alive():
-    Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8080}).start()
+    Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8080, 'debug': False, 'use_reloader': False}).start()
 
-# Start Flask server before the bot starts
 keep_alive()
 
-# === LOAD ENV ===
+# === LOAD ENV VARIABLES ===
 load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
@@ -47,6 +47,7 @@ tree = bot.tree
 
 DB_FILE = "vouches.db"
 
+# === PRODUCT OPTIONS ===
 products = [
     ("1337-ch3at5", "1337-ch3at5"),
     ("grandrp-m0n3y", "grandrp-m0n3y"),
@@ -76,6 +77,7 @@ products = [
     ("OTHER PRODUCT", "OTHER PRODUCT")
 ]
 
+# === BOT EVENTS ===
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
@@ -97,8 +99,9 @@ async def on_ready():
             )
         ''')
         await db.commit()
-        print("📦 Database initialized!")
+    print("📦 Database initialized!")
 
+# === VOUCH SYSTEM ===
 class ProductSelect(Select):
     def __init__(self, view):
         self.parent_view = view
@@ -112,7 +115,7 @@ class ProductSelect(Select):
 
 class ProductView(View):
     def __init__(self):
-        super().__init__()
+        super().__init__(timeout=30)  # timeout after 30s
         self.selected = None
         self.select = ProductSelect(self)
         self.add_item(self.select)
@@ -125,18 +128,20 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
         return
 
     view = ProductView()
-    await interaction.response.defer(ephemeral=True)
-    await interaction.followup.send("Please select a product to vouch for:", view=view, ephemeral=True)
+    await interaction.response.send_message("Please select a product to vouch for:", view=view, ephemeral=True)
     await view.wait()
 
-    product = view.selected
-    if not product:
-        await interaction.followup.send("⚠️ No product was selected.", ephemeral=True)
+    if not view.selected:
+        await interaction.followup.send("⚠️ You didn't select any product in time.", ephemeral=True)
         return
 
+    product = view.selected
+
     async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute("INSERT INTO vouches (vouched_user_id, vouched_by_id, product, feedback) VALUES (?, ?, ?, ?)",
-                         (user.id, interaction.user.id, product, feedback))
+        await db.execute(
+            "INSERT INTO vouches (vouched_user_id, vouched_by_id, product, feedback) VALUES (?, ?, ?, ?)",
+            (user.id, interaction.user.id, product, feedback)
+        )
         await db.commit()
         cursor = await db.execute("SELECT last_insert_rowid()")
         (vouch_id,) = await cursor.fetchone()
@@ -157,6 +162,9 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
     else:
         print("⚠️ LOG_CHANNEL_ID is invalid or bot can't access that channel.")
 
+    await interaction.followup.send("✅ Your vouch has been submitted successfully!", ephemeral=True)
+
+# === VIEW VOUCHES COMMAND ===
 @tree.command(name="vouches", description="See how many vouches a user has")
 @app_commands.describe(user="User to check")
 async def vouches(interaction: discord.Interaction, user: discord.Member):
@@ -165,17 +173,22 @@ async def vouches(interaction: discord.Interaction, user: discord.Member):
         rows = await cursor.fetchall()
 
     if not rows:
-        await interaction.response.send_message(f"{user.mention} has no vouches yet.\nMade by Kai")
+        await interaction.response.send_message(f"{user.mention} has no vouches yet.\nMade by Kai", ephemeral=True)
         return
 
     embed = discord.Embed(title=f"📋 Vouches for {user.display_name}", color=discord.Color.blue())
     for vouch_id, vouched_by_id, product, feedback, timestamp in rows[:10]:
-        embed.add_field(name=f"📬 Vouch #{vouch_id}", value=f"🎯 **{product}**\n💬 *{feedback}* ✅\n🙋 By: <@{vouched_by_id}>\n📅 {timestamp[:10]}", inline=False)
+        embed.add_field(
+            name=f"📬 Vouch #{vouch_id}",
+            value=f"🎯 **{product}**\n💬 *{feedback}* ✅\n🙋 By: <@{vouched_by_id}>\n📅 {timestamp[:10]}",
+            inline=False
+        )
     embed.set_footer(text="❤ Made By Kai | discord.gg/e2U2FNszUU")
 
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@tree.command(name="unvouch", description="Remove a user's vouch (admin only)")
+# === REMOVE VOUCHES COMMAND ===
+@tree.command(name="unvouch", description="Remove all vouches for a user (Admin Only)")
 @app_commands.describe(user="User to unvouch")
 async def unvouch(interaction: discord.Interaction, user: discord.Member):
     if not interaction.user.guild_permissions.administrator:
@@ -186,19 +199,23 @@ async def unvouch(interaction: discord.Interaction, user: discord.Member):
         await db.execute("DELETE FROM vouches WHERE vouched_user_id = ?", (user.id,))
         await db.commit()
 
-    await interaction.response.send_message(f"🗑️ All vouches for {user.mention} have been removed.\nMade by Kai")
+    await interaction.response.send_message(f"🗑️ All vouches for {user.mention} have been removed.\nMade by Kai", ephemeral=True)
 
-@tree.command(name="topvouched", description="See the most vouched users")
+# === TOP VOUCHED USERS ===
+@tree.command(name="topvouched", description="Show top 5 most vouched users")
 async def topvouched(interaction: discord.Interaction):
     async with aiosqlite.connect(DB_FILE) as db:
         cursor = await db.execute('''
-            SELECT vouched_user_id, COUNT(*) as count FROM vouches
-            GROUP BY vouched_user_id ORDER BY count DESC LIMIT 5
+            SELECT vouched_user_id, COUNT(*) as count
+            FROM vouches
+            GROUP BY vouched_user_id
+            ORDER BY count DESC
+            LIMIT 5
         ''')
-        top = await cursor.fetchall()
+        top_users = await cursor.fetchall()
 
     embed = discord.Embed(title="🏆 Top Vouched Users", color=discord.Color.gold())
-    for user_id, count in top:
+    for user_id, count in top_users:
         try:
             user = await bot.fetch_user(user_id)
             embed.add_field(name=user.display_name, value=f"{count} vouches", inline=False)
@@ -206,9 +223,9 @@ async def topvouched(interaction: discord.Interaction):
             embed.add_field(name=f"Unknown User ({user_id})", value=f"{count} vouches", inline=False)
     embed.set_footer(text="@GrandX Vouches | discord.gg/e2U2FNszUU")
 
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# === START THE BOT ===
+# === START BOT ===
 try:
     bot.run(TOKEN)
 except Exception as e:
