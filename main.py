@@ -77,7 +77,7 @@ async def init_db():
         """)
         await db.commit()
 
-# === VIEWS ===
+# === DROPDOWN VIEWS ===
 class ProductSelect(Select):
     def __init__(self, view):
         self.parent_view = view
@@ -122,11 +122,15 @@ class RatingView(View):
         self.parent_view = parent_view
         self.add_item(RatingSelect(parent_view))
 
-# === BOT EVENTS ===
+# === READY EVENT (sync commands) ===
 @bot.event
 async def on_ready():
     await init_db()
-    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    try:
+        synced = await tree.sync(guild=discord.Object(id=GUILD_ID))
+        print(f"✅ Synced {len(synced)} commands to GUILD_ID: {GUILD_ID}")
+    except Exception as e:
+        print(f"❌ Command sync failed: {e}")
     await bot.change_presence(activity=discord.Game(name="Vouching Service"))
     print(f"✅ Bot is online as {bot.user}")
 
@@ -166,7 +170,7 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
 
     await interaction.followup.send("✅ Your vouch has been submitted!", ephemeral=True)
 
-# === RUN BOT ===
+# === RUN THE BOT ===
 try:
     bot.run(TOKEN)
 except Exception as e:
