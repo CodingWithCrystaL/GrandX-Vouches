@@ -77,7 +77,7 @@ async def init_db():
         """)
         await db.commit()
 
-# === DROPDOWN VIEWS ===
+# === DROPDOWNS ===
 class ProductSelect(Select):
     def __init__(self, view):
         self.parent_view = view
@@ -143,7 +143,11 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
         return
 
     view = ProductRatingView()
-    await interaction.response.send_message("Please select a product to vouch for:", view=view, ephemeral=True)
+    if interaction.response.is_done():
+        await interaction.followup.send("Please select a product to vouch for:", view=view, ephemeral=True)
+    else:
+        await interaction.response.send_message("Please select a product to vouch for:", view=view, ephemeral=True)
+
     await view.wait()
 
     if not view.product or not view.rating:
@@ -170,7 +174,7 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
 
     await interaction.followup.send("✅ Your vouch has been submitted!", ephemeral=True)
 
-# === RUN THE BOT ===
+# === RUN BOT ===
 try:
     bot.run(TOKEN)
 except Exception as e:
