@@ -10,43 +10,27 @@ from threading import Thread
 
 # === KEEP ALIVE ===
 app = Flask(__name__)
-
 @app.route('/')
 def home():
     return "✅ Bot is alive!"
-
 def keep_alive():
     Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8080}).start()
-
 keep_alive()
 
 # === LOAD ENV ===
 load_dotenv()
-
 TOKEN = os.getenv("TOKEN")
-LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
-
-if not TOKEN:
-    print("❌ ERROR: DISCORD TOKEN not found in .env")
-    exit()
-
-if not LOG_CHANNEL_ID or not LOG_CHANNEL_ID.isdigit():
-    print("❌ ERROR: LOG_CHANNEL_ID is missing or invalid in .env")
-    exit()
-
-LOG_CHANNEL_ID = int(LOG_CHANNEL_ID)
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
+GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 
 # === BOT SETUP ===
 intents = discord.Intents.default()
-intents.guilds = True
 intents.members = True
-
-bot = commands.Bot(command_prefix="/", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
-
 DB_FILE = "vouches.db"
 
-products = [
+PRODUCTS = [
     ("1337-ch3at5", "1337-ch3at5"),
     ("grandrp-m0n3y", "grandrp-m0n3y"),
     ("grandrp-acc0unt5", "grandrp-acc0unt5"),
@@ -75,144 +59,115 @@ products = [
     ("OTHER PRODUCT", "OTHER PRODUCT")
 ]
 
-@bot.event
-async def on_ready():
-    print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    await tree.sync()
-    await bot.change_presence(
-        status=discord.Status.online,
-        activity=discord.Game(name="Vouches Of GrandX Store")
-    )
+GRANDX_LOGO_URL = "https://cdn.discordapp.com/attachments/1226891662254286911/1235928196612139090/7E21D39E-ECDF-4C6C-B393-347F979B16CE.jpeg"
 
+# === DB INIT ===
+async def init_db():
     async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute('''
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS vouches (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 vouched_user_id INTEGER,
                 vouched_by_id INTEGER,
                 product TEXT,
                 feedback TEXT,
+                rating INTEGER,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
-        ''')
+        """)
         await db.commit()
-        print("📦 Database initialized!")
 
+# === VIEWS ===
 class ProductSelect(Select):
     def __init__(self, view):
         self.parent_view = view
-        options = [discord.SelectOption(label=label, value=value) for value, label in products]
-        super().__init__(placeholder="🏩 Select your Product", min_values=1, max_values=1, options=options)
+        options = [discord.SelectOption(label=label, value=value) for value, label in PRODUCTS]
+        super().__init__(placeholder="Select your Product", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        self.parent_view.selected = self.values[0]
-        await interaction.response.defer()
+        self.parent_view.product = self.values[0]
+        await interaction.response.send_message("✅ Product selected. Now rate the service:", view=self.parent_view.rating_view, ephemeral=True)
+
+class RatingSelect(Select):
+    def __init__(self, view):
+        self.parent_view = view
+        options = [
+            discord.SelectOption(label="Fast Delivery ⚡", value="5"),
+            discord.SelectOption(label="Legit ✅", value="5"),
+            discord.SelectOption(label="Good 👍", value="4"),
+            discord.SelectOption(label="5/5 ⭐⭐⭐⭐⭐", value="5"),
+            discord.SelectOption(label="4/5 ⭐⭐⭐⭐", value="4"),
+            discord.SelectOption(label="3/5 ⭐⭐⭐", value="3"),
+            discord.SelectOption(label="2/5 ⭐⭐", value="2"),
+            discord.SelectOption(label="1/5 ⭐", value="1"),
+        ]
+        super().__init__(placeholder="Select your Feedback for the Service", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.rating = int(self.values[0])
         self.parent_view.stop()
+        await interaction.response.send_message("✅ Rating recorded!", ephemeral=True)
 
-class ProductView(View):
+class ProductRatingView(View):
     def __init__(self):
-        super().__init__(timeout=60)
-        self.selected = None
-        self.select = ProductSelect(self)
-        self.add_item(self.select)
+        super().__init__(timeout=120)
+        self.product = None
+        self.rating = None
+        self.rating_view = RatingView(self)
+        self.add_item(ProductSelect(self))
 
-@tree.command(name="vouch", description="Vouch for a user")
+class RatingView(View):
+    def __init__(self, parent_view):
+        super().__init__(timeout=60)
+        self.parent_view = parent_view
+        self.add_item(RatingSelect(parent_view))
+
+# === BOT EVENTS ===
+@bot.event
+async def on_ready():
+    await init_db()
+    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    await bot.change_presence(activity=discord.Game(name="Vouching Service"))
+    print(f"✅ Bot is online as {bot.user}")
+
+# === VOUCH COMMAND ===
+@tree.command(name="vouch", description="Give a vouch to someone", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User to vouch for", feedback="Your feedback message")
 async def vouch(interaction: discord.Interaction, user: discord.Member, feedback: str):
     if user.id == interaction.user.id:
-        await interaction.response.send_message("❌ You can't vouch for yourself!\nMade by Kai", ephemeral=True)
+        await interaction.response.send_message("❌ You can't vouch for yourself.", ephemeral=True)
         return
 
-    view = ProductView()
-    await interaction.response.send_message("🏩 Please select a product to vouch for:", view=view, ephemeral=True)
-    timeout = await view.wait()
+    view = ProductRatingView()
+    await interaction.response.send_message("Please select a product to vouch for:", view=view, ephemeral=True)
+    await view.wait()
 
-    if timeout or not view.selected:
-        await interaction.followup.send("⚠️ You didn't select a product in time. Please try again.", ephemeral=True)
+    if not view.product or not view.rating:
+        await interaction.followup.send("⏰ You didn't complete the selection in time.", ephemeral=True)
         return
-
-    product = view.selected
 
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute(
-            "INSERT INTO vouches (vouched_user_id, vouched_by_id, product, feedback) VALUES (?, ?, ?, ?)",
-            (user.id, interaction.user.id, product, feedback)
+            "INSERT INTO vouches (vouched_user_id, vouched_by_id, product, feedback, rating) VALUES (?, ?, ?, ?, ?)",
+            (user.id, interaction.user.id, view.product, feedback, view.rating)
         )
         await db.commit()
-        cursor = await db.execute("SELECT last_insert_rowid()")
-        (vouch_id,) = await cursor.fetchone()
 
-    embed = discord.Embed(
-        title=f"📬 Vouch #{vouch_id}",
-        color=discord.Color.purple()
-    )
-    embed.add_field(name="🎯 Product", value=f"**{product}**", inline=False)
-    embed.add_field(name="💬 Feedback", value=f"*{feedback}*", inline=False)
-    embed.add_field(name="🙋 Vouched by", value=f"<@{interaction.user.id}>", inline=False)
-    embed.set_thumbnail(url=interaction.user.avatar.url if interaction.user.avatar else "https://cdn.discordapp.com/embed/avatars/0.png")
-    embed.set_footer(text="❤ Made By Kai | discord.gg/e2U2FNszUU")
+    embed = discord.Embed(title="Feedback Received", description="We received feedback for your transaction!", color=discord.Color.green())
+    embed.add_field(name="Customer", value=user.mention, inline=False)
+    embed.add_field(name="Rating", value=f"{view.rating} ⭐", inline=False)
+    embed.add_field(name="Feedback", value=feedback, inline=False)
+    embed.set_thumbnail(url=GRANDX_LOGO_URL)
+    embed.set_footer(text="Thanks for your support! | Made by Kai", icon_url=GRANDX_LOGO_URL)
 
     channel = bot.get_channel(LOG_CHANNEL_ID)
     if channel:
         await channel.send(embed=embed)
-    else:
-        print("⚠️ LOG_CHANNEL_ID is invalid or bot can't access that channel.")
 
-    await interaction.followup.send("✅ Your vouch has been submitted successfully!", ephemeral=True)
+    await interaction.followup.send("✅ Your vouch has been submitted!", ephemeral=True)
 
-@tree.command(name="vouches", description="See how many vouches a user has")
-@app_commands.describe(user="User to check")
-async def vouches(interaction: discord.Interaction, user: discord.Member):
-    async with aiosqlite.connect(DB_FILE) as db:
-        cursor = await db.execute("SELECT id, vouched_by_id, product, feedback, timestamp FROM vouches WHERE vouched_user_id = ?", (user.id,))
-        rows = await cursor.fetchall()
-
-    if not rows:
-        await interaction.response.send_message(f"{user.mention} has no vouches yet.\nMade by Kai")
-        return
-
-    embed = discord.Embed(title=f"📋 Vouches for {user.display_name}", color=discord.Color.blue())
-    for vouch_id, vouched_by_id, product, feedback, timestamp in rows[:10]:
-        embed.add_field(name=f"📬 Vouch #{vouch_id}", value=f"🎯 **{product}**\n💬 *{feedback}*\n🙋 By: <@{vouched_by_id}>\n📅 {timestamp[:10]}", inline=False)
-    embed.set_footer(text="❤ Made By Kai | discord.gg/e2U2FNszUU")
-
-    await interaction.response.send_message(embed=embed)
-
-@tree.command(name="unvouch", description="Remove a user's vouch (admin only)")
-@app_commands.describe(user="User to unvouch")
-async def unvouch(interaction: discord.Interaction, user: discord.Member):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Only admins can use this command.\nMade by Kai", ephemeral=True)
-        return
-
-    async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute("DELETE FROM vouches WHERE vouched_user_id = ?", (user.id,))
-        await db.commit()
-
-    await interaction.response.send_message(f"🗑️ All vouches for {user.mention} have been removed.\nMade by Kai")
-
-@tree.command(name="topvouched", description="See the most vouched users")
-async def topvouched(interaction: discord.Interaction):
-    async with aiosqlite.connect(DB_FILE) as db:
-        cursor = await db.execute('''
-            SELECT vouched_user_id, COUNT(*) as count FROM vouches
-            GROUP BY vouched_user_id ORDER BY count DESC LIMIT 5
-        ''')
-        top = await cursor.fetchall()
-
-    embed = discord.Embed(title="🏆 Top Vouched Users", color=discord.Color.gold())
-    for user_id, count in top:
-        try:
-            user = await bot.fetch_user(user_id)
-            embed.add_field(name=user.display_name, value=f"{count} vouches", inline=False)
-        except:
-            embed.add_field(name=f"Unknown User ({user_id})", value=f"{count} vouches", inline=False)
-    embed.set_footer(text="@GrandX Vouches | discord.gg/e2U2FNszUU")
-
-    await interaction.response.send_message(embed=embed)
-
-# === START THE BOT ===
+# === RUN BOT ===
 try:
     bot.run(TOKEN)
 except Exception as e:
-    print(f"❌ ERROR while starting bot: {e}")
+    print(f"❌ Error while running the bot: {e}")
